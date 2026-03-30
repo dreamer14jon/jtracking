@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Stock Dashboard</title>
+  <!-- Bootstrap CSS for responsive layout -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Plotly for candlestick and interactive charts -->
+  <script src="https://cdn.plot.ly/plotly-2.16.3.min.js"></script>
+  <!-- Chart.js for additional charts if needed -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+  <style>
+    /* Simple styling for the dashboard */
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f8f9fa;
+    }
+    .navbar-brand {
+      font-weight: bold;
+    }
+    .tab-content {
+      padding: 20px;
+    }
+    .card {
+      margin-bottom: 20px;
+    }
+    #newsList {
+      max-height: 300px;
+      overflow-y: auto;
+    }
+  </style>
+</head>
+<body>
+  <!-- Navigation bar with tabs -->
+  <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container-fluid">
+      <a class="navbar-brand" href="#">Stock Dashboard</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="navbarNav">
+        <ul class="navbar-nav ms-auto">
+          <li class="nav-item">
+            <a class="nav-link active" href="#portfolio" data-bs-toggle="tab">Portfolio</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#opportunities" data-bs-toggle="tab">Opportunities</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#watchlist" data-bs-toggle="tab">Watchlist</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Content for each tab -->
+  <div class="tab-content">
+    <!-- Portfolio section -->
+    <div class="tab-pane fade show active" id="portfolio">
+      <h2 class="mt-3">Your Portfolio</h2>
+      <p>This section shows the positions you hold, what you paid and when, along with current market prices.</p>
+      <div id="portfolioSummary" class="row"></div>
+      <table id="portfolioTable" class="table table-striped table-bordered">
+        <thead>
+          <tr>
+            <th>Ticker</th>
+            <th>Shares</th>
+            <th>Purchase Price</th>
+            <th>Purchase Date</th>
+            <th>Current Price</th>
+            <th>Gain/Loss</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div id="portfolioChart" style="height:400px;"></div>
+      <h3 class="mt-4">News &amp; Market Sentiment</h3>
+      <ul id="newsList" class="list-group"></ul>
+    </div>
+
+    <!-- Opportunities section -->
+    <div class="tab-pane fade" id="opportunities">
+      <h2 class="mt-3">Opportunity Finder</h2>
+      <p>This section highlights stocks that appear oversold or overbought based on the Relative Strength Index (RSI) and moving-average crossovers. The data is refreshed when the page loads.</p>
+      <table id="opportunityTable" class="table table-bordered">
+        <thead>
+          <tr>
+            <th>Ticker</th>
+            <th>RSI (14)</th>
+            <th>50‑day SMA</th>
+            <th>200‑day SMA</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <!-- Watchlist section -->
+    <div class="tab-pane fade" id="watchlist">
+      <h2 class="mt-3">Watchlist</h2>
+      <p>Add symbols you want to monitor. Clicking a row will load its chart and latest news.</p>
+      <form id="addWatchForm" class="mb-3">
+        <div class="row g-2">
+          <div class="col-md-4">
+            <input type="text" id="watchSymbol" class="form-control" placeholder="Enter stock symbol" aria-label="Stock symbol">
+          </div>
+          <div class="col-md-2">
+            <button type="submit" class="btn btn-primary">Add</button>
+          </div>
+        </div>
+      </form>
+      <table id="watchTable" class="table table-hover table-striped">
+        <thead>
+          <tr>
+            <th>Ticker</th>
+            <th>Current Price</th>
+            <th>Change (%)</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div id="watchChart" style="height:400px;"></div>
+    </div>
+  </div>
+
+  <!-- Dashboard logic -->
+  <script>
+  // Sample holdings. Replace with your own portfolio data.
+  const holdings = [
+    { ticker: 'AAPL', shares: 20, purchasePrice: 150.00, purchaseDate: '2025-06-01' },
+    { ticker: 'MSFT', shares: 10, purchasePrice: 280.00, purchaseDate: '2025-07-10' },
+    { ticker: 'TSLA', shares: 5, purchasePrice: 700.00, purchaseDate: '2025-04-15' }
+  ];
+
+  // Load watchlist from local storage or use defaults
+  const watchlist = JSON.parse(localStorage.getItem('watchlist') || '[]');
+
+  document.addEventListener('DOMContentLoaded', function() {
+    renderPortfolio();
+    renderWatchlist();
+    // Add symbol to watchlist handler
+    document.getElementById('addWatchForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+      const symbolInput = document.getElementById('watchSymbol');
+      const symbol = symbolInput.value.trim().toUpperCase();
+      if (symbol && !watchlist.includes(symbol)) {
+        watchlist.push(symbol);
+        localStorage.setItem('watchlist', JSON.stringify(watchlist));
+        symbolInput.value = '';
+        renderWatchlist();
+      }
+    });
+  });
+
+  // Fetch time series from Alpha Vantage (requires API key). For demonstration this uses the free 'demo' key which limits data.
+  async function fetchTimeSeries(symbol) {
+    const API_KEY = 'demo'; // Replace with your own Alpha Vantage API key for better results
+    const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol=${symbol}&apikey=${API_KEY}`;
+    const response = await fetch(url);
+    const data = await response.json();
+    return data['Time Series (Daily)'];
+  }
+
+  // Calculate RSI based on closing prices
+  function calculateRSI(closes, period = 14) {
+    let gains = 0;
+    let losses = 0;
+    for (let i = 1; i <= period; i++) {
+      const diff = closes[i - 1] - closes[i];
+      if (diff > 0) gains += diff; else losses -= diff;
+    }
+    const averageGain = gains / period;
+    const averageLoss = losses / period;
+    const rs = averageGain / averageLoss;
+    return 100 - (100 / (1 + rs));
+  }
+
+  // Calculate simple moving average
+  function calculateSMA(closes, period) {
+    const sum = closes.slice(0, period).reduce((a, b) => a + b, 0);
+    return sum / period;
+  }
+
+  // Render portfolio table and chart
+  async function renderPortfolio() {
+    const tbody = document.querySelector('#portfolioTable tbody');
+    tbody.innerHTML = '';
+    for (const stock of holdings) {
+      let currentPrice;
+      let gainLoss;
+      try {
+        const daily = await fetchTimeSeries(stock.ticker);
+        if (!daily || Object.keys(daily).length === 0) throw new Error('No data');
+        const latestDate = Object.keys(daily)[0];
+        currentPrice = parseFloat(daily[latestDate]['4. close']);
+        gainLoss = ((currentPrice - stock.purchasePrice) / stock.purchasePrice * 100).toFixed(2);
+      } catch (error) {
+        // If fetching fails (due to network or API limit), fall back to purchase price and mark gain/loss as N/A
+        console.error('Failed to fetch price for', stock.ticker, error);
+        currentPrice = stock.purchasePrice;
+        gainLoss = 'N/A';
+      }
+      const row = document.createElement('tr');
+      row.innerHTML = `<td>${stock.ticker}</td><td>${stock.shares}</td><td>${stock.purchasePrice.toFixed(2)}</td><td>${stock.purchaseDate}</td><td>${currentPrice.toFixed(2)}</td><td>${gainLoss}${gainLoss !== 'N/A' ? '%' : ''}</td>`;
+      tbody.appendChild(row);
+    }
+    // Draw candlestick chart for the first holding
+    if (holdings.length > 0) {
+      drawCandlestickChart(holdings[0].ticker, 'portfolioChart');
+      fetchNews(holdings[0].ticker);
+    }
+    // Find opportunities on first load
+    findOpportunities();
+  }
+
+  // Render watchlist table and chart
+  async function renderWatchlist() {
+    const tbody = document.querySelector('#watchTable tbody');
+    tbody.innerHTML = '';
+    for (const symbol of watchlist) {
+      let price;
+      let change;
+      try {
+        const daily = await fetchTimeSeries(symbol);
+        const dates = Object.keys(daily);
+        if (!daily || dates.length < 2) throw new Error('No data');
+        const latest = daily[dates[0]];
+        const prev = daily[dates[1]];
+        price = parseFloat(latest['4. close']);
+        const prevPrice = parseFloat(prev['4. close']);
+        change = ((price - prevPrice) / prevPrice * 100).toFixed(2);
+      } catch (error) {
+        console.error('Failed to fetch watchlist data for', symbol, error);
+        // Use zero change and purchase price for demonstration if data is unavailable
+        price = 0;
+        change = 'N/A';
+      }
+      const row = document.createElement('tr');
+      row.innerHTML = `<td>${symbol}</td><td>${price.toFixed(2)}</td><td>${change}${change !== 'N/A' ? '%' : ''}</td><td><button class="btn btn-sm btn-danger" onclick="removeFromWatch('${symbol}')">Remove</button></td>`;
+      row.addEventListener('click', () => {
+        drawCandlestickChart(symbol, 'watchChart');
+        fetchNews(symbol);
+      });
+      tbody.appendChild(row);
+    }
+    // Draw a chart for the first watchlist symbol if available
+    if (watchlist.length > 0) {
+      drawCandlestickChart(watchlist[0], 'watchChart');
+      fetchNews(watchlist[0]);
+    }
+  }
+
+  // Remove symbol from watchlist
+  function removeFromWatch(symbol) {
+    const index = watchlist.indexOf(symbol);
+    if (index > -1) {
+      watchlist.splice(index, 1);
+      localStorage.setItem('watchlist', JSON.stringify(watchlist));
+      renderWatchlist();
+    }
+  }
+
+  // Draw candlestick chart using Plotly
+  async function drawCandlestickChart(symbol, divId) {
+    const daily = await fetchTimeSeries(symbol);
+    // Use the last 60 days for the chart
+    const dates = Object.keys(daily).slice(0, 60).reverse();
+    const open = [], high = [], low = [], close = [];
+    dates.forEach(date => {
+      const d = daily[date];
+      open.push(parseFloat(d['1. open']));
+      high.push(parseFloat(d['2. high']));
+      low.push(parseFloat(d['3. low']));
+      close.push(parseFloat(d['4. close']));
+    });
+    const trace = {
+      x: dates,
+      open: open,
+      high: high,
+      low: low,
+      close: close,
+      increasing: { line: { color: '#2ecc40' } },
+      decreasing: { line: { color: '#ff4136' } },
+      type: 'candlestick',
+      name: symbol
+    };
+    const layout = {
+      title: `${symbol} Candlestick Chart`,
+      xaxis: { title: 'Date' },
+      yaxis: { title: 'Price' },
+      margin: { t: 40, r: 10, b: 40, l: 50 }
+    };
+    Plotly.newPlot(divId, [trace], layout, { responsive: true });
+  }
+
+  // Fetch news using NewsAPI (requires API key). Replace 'YOUR_NEWSAPI_KEY' with your key.
+  async function fetchNews(symbol) {
+    const API_KEY = 'YOUR_NEWSAPI_KEY';
+    // Do not attempt to fetch if no API key is provided
+    if (!API_KEY || API_KEY === 'YOUR_NEWSAPI_KEY') {
+      document.getElementById('newsList').innerHTML = '<li class="list-group-item">Provide a NewsAPI key to load news.</li>';
+      return;
+    }
+    const url = `https://newsapi.org/v2/everything?q=${symbol}&sortBy=publishedAt&language=en&apiKey=${API_KEY}`;
+    try {
+      const resp = await fetch(url);
+      const data = await resp.json();
+      const newsList = document.getElementById('newsList');
+      newsList.innerHTML = '';
+      if (data.articles) {
+        data.articles.slice(0, 5).forEach(article => {
+          const li = document.createElement('li');
+          li.className = 'list-group-item';
+          li.innerHTML = `<a href="${article.url}" target="_blank">${article.title}</a><br><small>${article.source.name}</small>`;
+          newsList.appendChild(li);
+        });
+      }
+    } catch (error) {
+      document.getElementById('newsList').innerHTML = `<li class="list-group-item">Error loading news: ${error.message}</li>`;
+    }
+  }
+
+  // Identify trading opportunities by computing RSI and moving averages
+  async function findOpportunities() {
+    // Candidate symbols for demonstration
+    const symbols = ['AAPL', 'MSFT', 'TSLA', 'GOOGL', 'AMZN'];
+    const tbody = document.querySelector('#opportunityTable tbody');
+    tbody.innerHTML = '';
+    for (const sym of symbols) {
+      let rsi, sma50, sma200;
+      let status = '';
+      try {
+        const daily = await fetchTimeSeries(sym);
+        if (!daily) throw new Error('No data');
+        const dates = Object.keys(daily);
+        const closes = dates.slice(0, 200).map(date => parseFloat(daily[date]['4. close']));
+        rsi = calculateRSI(closes);
+        sma50 = calculateSMA(closes, Math.min(50, closes.length));
+        sma200 = calculateSMA(closes, Math.min(200, closes.length));
+        if (rsi < 30) status = 'Oversold';
+        else if (rsi > 70) status = 'Overbought';
+        if (sma50 > sma200) status += (status ? ', ' : '') + 'Bullish Cross';
+        else if (sma50 < sma200) status += (status ? ', ' : '') + 'Bearish Cross';
+      } catch (error) {
+        console.error('Failed to calculate opportunities for', sym, error);
+        rsi = sma50 = sma200 = 0;
+        status = 'Data unavailable';
+      }
+      const row = document.createElement('tr');
+      row.innerHTML = `<td>${sym}</td><td>${rsi.toFixed(2)}</td><td>${sma50.toFixed(2)}</td><td>${sma200.toFixed(2)}</td><td>${status}</td>`;
+      tbody.appendChild(row);
+    }
+  }
+  </script>
+  <!-- Bootstrap JS bundle -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
