@@ -192,12 +192,22 @@
     const tbody = document.querySelector('#portfolioTable tbody');
     tbody.innerHTML = '';
     for (const stock of holdings) {
-      const daily = await fetchTimeSeries(stock.ticker);
-      const latestDate = Object.keys(daily)[0];
-      const currentPrice = parseFloat(daily[latestDate]['4. close']);
-      const gainLoss = ((currentPrice - stock.purchasePrice) / stock.purchasePrice * 100).toFixed(2);
+      let currentPrice;
+      let gainLoss;
+      try {
+        const daily = await fetchTimeSeries(stock.ticker);
+        if (!daily || Object.keys(daily).length === 0) throw new Error('No data');
+        const latestDate = Object.keys(daily)[0];
+        currentPrice = parseFloat(daily[latestDate]['4. close']);
+        gainLoss = ((currentPrice - stock.purchasePrice) / stock.purchasePrice * 100).toFixed(2);
+      } catch (error) {
+        // If fetching fails (due to network or API limit), fall back to purchase price and mark gain/loss as N/A
+        console.error('Failed to fetch price for', stock.ticker, error);
+        currentPrice = stock.purchasePrice;
+        gainLoss = 'N/A';
+      }
       const row = document.createElement('tr');
-      row.innerHTML = `<td>${stock.ticker}</td><td>${stock.shares}</td><td>${stock.purchasePrice.toFixed(2)}</td><td>${stock.purchaseDate}</td><td>${currentPrice.toFixed(2)}</td><td>${gainLoss}%</td>`;
+      row.innerHTML = `<td>${stock.ticker}</td><td>${stock.shares}</td><td>${stock.purchasePrice.toFixed(2)}</td><td>${stock.purchaseDate}</td><td>${currentPrice.toFixed(2)}</td><td>${gainLoss}${gainLoss !== 'N/A' ? '%' : ''}</td>`;
       tbody.appendChild(row);
     }
     // Draw candlestick chart for the first holding
@@ -214,15 +224,25 @@
     const tbody = document.querySelector('#watchTable tbody');
     tbody.innerHTML = '';
     for (const symbol of watchlist) {
-      const daily = await fetchTimeSeries(symbol);
-      const dates = Object.keys(daily);
-      const latest = daily[dates[0]];
-      const prev = daily[dates[1]];
-      const price = parseFloat(latest['4. close']);
-      const prevPrice = parseFloat(prev['4. close']);
-      const change = ((price - prevPrice) / prevPrice * 100).toFixed(2);
+      let price;
+      let change;
+      try {
+        const daily = await fetchTimeSeries(symbol);
+        const dates = Object.keys(daily);
+        if (!daily || dates.length < 2) throw new Error('No data');
+        const latest = daily[dates[0]];
+        const prev = daily[dates[1]];
+        price = parseFloat(latest['4. close']);
+        const prevPrice = parseFloat(prev['4. close']);
+        change = ((price - prevPrice) / prevPrice * 100).toFixed(2);
+      } catch (error) {
+        console.error('Failed to fetch watchlist data for', symbol, error);
+        // Use zero change and purchase price for demonstration if data is unavailable
+        price = 0;
+        change = 'N/A';
+      }
       const row = document.createElement('tr');
-      row.innerHTML = `<td>${symbol}</td><td>${price.toFixed(2)}</td><td>${change}%</td><td><button class="btn btn-sm btn-danger" onclick="removeFromWatch('${symbol}')">Remove</button></td>`;
+      row.innerHTML = `<td>${symbol}</td><td>${price.toFixed(2)}</td><td>${change}${change !== 'N/A' ? '%' : ''}</td><td><button class="btn btn-sm btn-danger" onclick="removeFromWatch('${symbol}')">Remove</button></td>`;
       row.addEventListener('click', () => {
         drawCandlestickChart(symbol, 'watchChart');
         fetchNews(symbol);
@@ -313,18 +333,25 @@
     const tbody = document.querySelector('#opportunityTable tbody');
     tbody.innerHTML = '';
     for (const sym of symbols) {
-      const daily = await fetchTimeSeries(sym);
-      const dates = Object.keys(daily);
-      // Extract closing prices for up to 200 days
-      const closes = dates.slice(0, 200).map(date => parseFloat(daily[date]['4. close']));
-      const rsi = calculateRSI(closes);
-      const sma50 = calculateSMA(closes, Math.min(50, closes.length));
-      const sma200 = calculateSMA(closes, Math.min(200, closes.length));
+      let rsi, sma50, sma200;
       let status = '';
-      if (rsi < 30) status = 'Oversold';
-      else if (rsi > 70) status = 'Overbought';
-      if (sma50 > sma200) status += (status ? ', ' : '') + 'Bullish Cross';
-      else if (sma50 < sma200) status += (status ? ', ' : '') + 'Bearish Cross';
+      try {
+        const daily = await fetchTimeSeries(sym);
+        if (!daily) throw new Error('No data');
+        const dates = Object.keys(daily);
+        const closes = dates.slice(0, 200).map(date => parseFloat(daily[date]['4. close']));
+        rsi = calculateRSI(closes);
+        sma50 = calculateSMA(closes, Math.min(50, closes.length));
+        sma200 = calculateSMA(closes, Math.min(200, closes.length));
+        if (rsi < 30) status = 'Oversold';
+        else if (rsi > 70) status = 'Overbought';
+        if (sma50 > sma200) status += (status ? ', ' : '') + 'Bullish Cross';
+        else if (sma50 < sma200) status += (status ? ', ' : '') + 'Bearish Cross';
+      } catch (error) {
+        console.error('Failed to calculate opportunities for', sym, error);
+        rsi = sma50 = sma200 = 0;
+        status = 'Data unavailable';
+      }
       const row = document.createElement('tr');
       row.innerHTML = `<td>${sym}</td><td>${rsi.toFixed(2)}</td><td>${sma50.toFixed(2)}</td><td>${sma200.toFixed(2)}</td><td>${status}</td>`;
       tbody.appendChild(row);
